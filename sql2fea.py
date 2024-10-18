@@ -1,12 +1,13 @@
 import sys
-
+import ast
+import re
 sys.path.append(".")
 
 # max_column_in_table = 15
 import torch
 import torch.nn as nn
 import numpy as np
-from HyperQO.ImportantConfig import Config
+from QPE.ImportantConfig import Config
 import pandas as pd
 import json
 
@@ -19,6 +20,41 @@ def zero_hc(input_dim=1):
 
 
 column_id = {}
+
+def parse_index_config(index_str):
+    '''处理输入的configuration，转化成table,cols的形式'''
+    # 将字符串转换为列表
+    index_list = ast.literal_eval(index_str)
+    
+    result = []
+    for index in index_list:
+        # 去掉 I() 的部分，提取表名和列名
+        index_content = index[4:-1]  # 去掉前面的 'I(' 和后面的 ')'
+        table_cols = index_content.split(',')
+        
+        # 提取表名和列名
+        table = table_cols[0].split('.')[0]  # 假设表名是第一个元素
+        cols = [col.split('.')[1] for col in table_cols]  # 提取列名
+        
+        result.append({'table': table, 'cols': cols})
+    
+    return result
+
+def extract_table_alias(sql):
+    '''提取表名与别名的对应关系，支持一个表对应多个别名'''
+    # 正则表达式匹配表名及其别名，支持带点的表名
+    pattern = r'\b([\w\.]+)\s+AS\s+([\w]+)'
+    matches = re.findall(pattern, sql, re.IGNORECASE)
+
+    table_alias_dict = {}
+    
+    for match in matches:
+        table_name = match[0]
+        alias_name = match[1]
+        if table_name not in table_alias_dict:
+            table_alias_dict[table_name] = []
+        table_alias_dict[table_name].append(alias_name)
+    return table_alias_dict
 
 
 def getColumnId(column):
@@ -34,15 +70,11 @@ class Sql2Vec:
     def to_vec(self, sql):
         return np.array([1]), set(['kt1'])
 
-
+operator_vector_dict={}
 # 从 JSON 文件加载字典operater_counts
-with open('/mcts/QPE/information/operater_counts.json', 'r') as json_file:
-    operater_counts = json.load(json_file)
-
 JOIN_TYPES = ["Nested Loop", "Hash Join", "Merge Join"]
 LEAF_TYPES = ["Seq Scan", "Index Scan", "Index Only Scan", "Bitmap Index Scan", "CTE Scan", "Bitmap Heap Scan",
               "Subquery Scan"]
-ALL_TYPES = [k for k, _ in operater_counts.items()]
 
 aggregate_operators = ['Aggregate', 'Group', 'WindowAgg', 'Hash']
 merge_and_join_operators = ['Gather Merge', 'Merge Join', 'Nested Loop', 'Hash Join', 'Merge Append']
@@ -51,8 +83,10 @@ gather_and_materialize_operators = ['Gather', 'Materialize']
 subquery_and_cte_operators = ['Subquery Scan', 'CTE Scan']
 set_operation_and_others = ['SetOp', 'Append', 'Result', 'Unique', 'Limit']
 
-table_statistics = pd.read_csv('/mcts/QPE/information/table_statistics.csv').iloc[70:, :]  # 前70条系统表数据
-table_rows = pd.read_csv('/mcts/QPE/information/table_row_counts.csv')  # 前70条系统表数据
+ALL_TYPES = JOIN_TYPES + LEAF_TYPES + aggregate_operators + merge_and_join_operators + sort_and_scan_operators + gather_and_materialize_operators + subquery_and_cte_operators + set_operation_and_others
+
+table_statistics = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/table_statistics.csv').iloc[70:, :]  # 前70条系统表数据
+table_rows = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/table_row_counts.csv')  # 前70条系统表数据
 Column_to_NullFraction_dict = dict(zip(table_statistics['Column'], table_statistics['Null Fraction']))
 Column_to_DistinctValues_dict = dict(zip(table_statistics['Column'], table_statistics['Distinct Values']))
 Column_list = table_statistics['Column'].values
@@ -157,7 +191,7 @@ value_extractor = ValueExtractor()
 
 
 def get_plan_stats(data):
-    return [value_extractor.encode(data["Total Cost"]), data["Plan Rows"]]
+    return [data["Total Cost"], data["Plan Rows"]]
 
 
 class TreeBuilderError(Exception):
@@ -190,13 +224,18 @@ class PredicateEncode:
 class TreeBuilder:
     def __init__(self):
         self.__stats = get_plan_stats
-        self.id2aliasname = config.id2aliasname
-        self.aliasname2id = config.aliasname2id
         self.operater_embeddings = nn.Embedding(24, 10)  # modify input num and output num
+        self.index_config_dicts=[]
+        self.table_to_alias_dict={}
+    
+    def set_configruations(self,config):
+        self.index_config_dicts=parse_index_config(config)
+        # print('self.index_config_dicts:',self.index_config_dicts)
 
-    # def get_operater_type_to_embedding(self, operator_type):
-    #     return self.operater_embeddings(operator_type)
-
+    def set_table_to_alias_dict(self,sql_text):
+        self.table_to_alias_dict=extract_table_alias(sql_text)
+        # print('self.table_to_alias_dict:',self.table_to_alias_dict)
+    
     def __relation_name(self, node):
         if "Relation Name" in node:
             return node["Relation Name"]
@@ -237,15 +276,18 @@ class TreeBuilder:
     def __featurize_join(self, node, children_inputrows, current_height):
         NullFraction_DistinctValues = get_max_NullFraction_DistinctValues(get_relative_col(node))
         cost_est_rows = self.__stats(node)
+        # print('cost_est_rows',cost_est_rows)
         if node["Node Type"] != 'Sort':
-            cost_reduction = (1 - children_inputrows / cost_est_rows[1]) * cost_est_rows[0]
+            cost_reduction = (1 -  cost_est_rows[1]/children_inputrows) * cost_est_rows[0]
         else:
             cost_reduction = cost_est_rows[0]
+        # print('cost_reduction',cost_reduction)
         arr = np.zeros(len(ALL_TYPES))
         arr[ALL_TYPES.index(node["Node Type"])] = 1
         feature = np.concatenate((arr, encode_operator_heap_type(node['Node Type']), cost_est_rows,
-                                  [children_inputrows / cost_est_rows[1], current_height, cost_reduction],
+                                  [cost_est_rows[1]/children_inputrows, current_height, cost_reduction],
                                   NullFraction_DistinctValues))
+        # print('promotion',feature)
         feature = torch.tensor(feature, device=config.device, dtype=torch.float32).reshape(-1, config.input_size)
         return feature
 
@@ -264,9 +306,50 @@ class TreeBuilder:
         return feature
 
     def plan_to_feature_tree(self, plan, current_height):
-        # children = plan["Plans"] if "Plans" in plan else []
         if "Plan" in plan:
             plan = plan["Plan"]
+        # print(plan)
+        #针对一个filter谓词对应两个算子问题，提取算子的表名加以区别
+        if "Alias" in plan.keys():
+            table_Alias=plan["Alias"]
+        else:
+            table_Alias=''
+        
+        key_cond_list=[]
+        for element in ["Filter", "Cond"]:
+            for key in plan.keys():
+                if element in key:
+                    key_cond_list.append(key)
+                    # print(f"Found '{element}' in key: {key}")
+                    # break  # 一个operator可能对应多个cmp，同时存在Filter和Cond
+        cond_list=[]
+        if key_cond_list != []:
+            for key_cond in key_cond_list:
+                cond_list.append(table_Alias+'_47_'+plan[key_cond])#_*_连接table and key
+                
+        #处理operator对应的configruations
+        #每个cond应该对应不同的values_to_add，可能index建立在filter而不再cond上
+        values_to_add_list=[]
+        #configuration中涉及很多个索引index
+        for cond in cond_list:
+            index_position=0
+            involved_index_num=0
+            for config_dic in self.index_config_dicts:
+                table_name=config_dic['table']
+                index_alias=self.table_to_alias_dict[table_name]
+                for alias in index_alias:
+                #alias:这个索引的别名，cond中应该包含operator涉及的表别名与列名
+                    for index_inv_idx in range(len(config_dic['cols'])):
+                        #别名在cond、列都在cond
+                        #(列名 or .col or  in cond  且 表名_ or 表名. or 空格表名 or 表名_ in cond
+                        if (alias+'.' in cond or alias+'_' in cond or '('+alias in cond or ' '+alias in cond) and ('('+config_dic['cols'][index_inv_idx] in cond or '.'+config_dic['cols'][index_inv_idx] in cond):#TODO 注意id被movie_id包含的情况
+                            #这个操作算子的col列已经有建立索引
+                            #index_position添加index_inv在对应的index项里的cols里的位置p，1/p
+                            index_position+=1/(index_inv_idx+1)
+                            involved_index_num+=1
+            values_to_add_list.append(torch.tensor([[index_position, involved_index_num]]))
+                            
+        
         children = plan["Plan"] if "Plan" in plan else (plan["Plans"] if "Plans" in plan else [])
 
         if len(children) > 2:
@@ -276,6 +359,9 @@ class TreeBuilder:
             children_inputrows = children[0]["Plan Rows"]
             my_vec = self.__featurize_join(plan, children_inputrows, current_height)
             child_value = self.plan_to_feature_tree(children[0], current_height + 1)
+            if cond_list!='':
+                for cond_idx in range(len(cond_list)):
+                    operator_vector_dict[cond_list[cond_idx]]=torch.cat((my_vec[:, 34:], values_to_add_list[cond_idx]), dim=1)
             return (my_vec, child_value)
         # print(plan)
         if len(children) == 2:
@@ -284,11 +370,20 @@ class TreeBuilder:
             left = self.plan_to_feature_tree(children[0], current_height + 1)
             right = self.plan_to_feature_tree(children[1], current_height + 1)
             # print('is_join',my_vec)
+            if cond_list!='':
+                for cond_idx in range(len(cond_list)):
+                    operator_vector_dict[cond_list[cond_idx]]=torch.cat((my_vec[:, 34:], values_to_add_list[cond_idx]), dim=1)
             return (my_vec, left, right)
 
         if not children:
             # print(plan)
             s = self.__featurize_scan(plan, current_height)
+            if cond_list!='':
+                for cond_idx in range(len(cond_list)):
+                    operator_vector_dict[cond_list[cond_idx]]=torch.cat((s[:, 34:], values_to_add_list[cond_idx]), dim=1)
             return s
 
         raise TreeBuilderError("Node wasn't transparent, a join, or a scan: " + str(plan))
+    
+    def get_operator_vector(self):
+        return operator_vector_dict

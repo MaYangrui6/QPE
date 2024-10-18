@@ -6,15 +6,15 @@ class Config:
     def __init__(self, ):
         self.datafile = 'JOBqueries.workload'
         self.schemaFile = "schema.sql"
-        self.database = 'imdbload'
+        self.database = 'indexselection_tpcds___1'
         self.user = 'postgres'
         self.password = "password"
         self.userName = self.user
         self.usegpu = True
         self.head_num = 10
-        self.input_size = 36
+        self.input_size = 47
         self.sql_size = 20
-        self.hidden_size = 36 * 2  # self.input_size 的整数倍
+        self.hidden_size = 47 * 2  # self.input_size 的整数倍
         self.batch_size = 64
         self.ip = "127.0.0.1"
         self.port = 5432
