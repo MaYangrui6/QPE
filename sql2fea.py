@@ -84,9 +84,19 @@ subquery_and_cte_operators = ['Subquery Scan', 'CTE Scan']
 set_operation_and_others = ['SetOp', 'Append', 'Result', 'Unique', 'Limit']
 
 ALL_TYPES = JOIN_TYPES + LEAF_TYPES + aggregate_operators + merge_and_join_operators + sort_and_scan_operators + gather_and_materialize_operators + subquery_and_cte_operators + set_operation_and_others
-
-table_statistics = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/table_statistics.csv').iloc[70:, :]  # 前70条系统表数据
-table_rows = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/table_row_counts.csv')  # 前70条系统表数据
+if config.database=='indexselection_tpcds___10':
+    table_statistics = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/tpcds_10_table_statistics.csv')
+    table_rows = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/tpcds_10_table_row_counts.csv')
+elif config.database=='indexselection_tpcds___1':
+    table_statistics = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/tpcds_1_table_statistics.csv')
+    table_rows = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/tpcds_1_table_row_counts.csv')
+elif config.database=='indexselection_tpch___10':
+    table_statistics = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/tpch_table_statistics.csv')
+    table_rows = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/tpch_table_row_counts.csv')
+elif config.database=='imdbload':
+    table_statistics = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/job_table_statistics.csv')
+    table_rows = pd.read_csv('/home/ubuntu/project/mcts/QPE/information/job_table_row_counts.csv')
+    
 Column_to_NullFraction_dict = dict(zip(table_statistics['Column'], table_statistics['Null Fraction']))
 Column_to_DistinctValues_dict = dict(zip(table_statistics['Column'], table_statistics['Distinct Values']))
 Column_list = table_statistics['Column'].values
@@ -336,7 +346,11 @@ class TreeBuilder:
             involved_index_num=0
             for config_dic in self.index_config_dicts:
                 table_name=config_dic['table']
-                index_alias=self.table_to_alias_dict[table_name]
+                #有可能这个sql没用别名
+                if table_name in self.table_to_alias_dict:
+                    index_alias=self.table_to_alias_dict[table_name]
+                else:
+                    index_alias=table_name
                 for alias in index_alias:
                 #alias:这个索引的别名，cond中应该包含operator涉及的表别名与列名
                     for index_inv_idx in range(len(config_dic['cols'])):
