@@ -4,7 +4,7 @@ from os import DirEntry
 import numpy as np
 import torch
 import torch.nn as nn
-from HyperQO.ImportantConfig import Config
+from QPE.ImportantConfig import Config
 
 config = Config()
 

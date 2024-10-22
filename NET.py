@@ -2,7 +2,7 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 from collections import namedtuple
-from HyperQO.ImportantConfig import Config
+from QPE.ImportantConfig import Config
 import torch.nn.functional as F
 
 config = Config()

@@ -4,8 +4,6 @@ from datetime import datetime
 import json
 import torch
 import sys
-
-sys.path.append('/home/ubuntu/project/mcts')
 from ImportantConfig import Config
 from sql2fea import TreeBuilder, value_extractor
 from NET import TreeNet
@@ -31,7 +29,7 @@ if __name__ == "__main__":
     tree_builder = TreeBuilder()
     sql2vec = Sql2Vec()
     # 这里的 input_size 必须为偶数！
-    value_network = SPINN(head_num=config.head_num, input_size=36, hidden_size=config.hidden_size, table_num=50,
+    value_network = SPINN(head_num=config.head_num, input_size=47, hidden_size=config.hidden_size, table_num=50,
                           sql_size=config.sql_size, attention_dim=30).to(config.device)
     for name, param in value_network.named_parameters():
         from torch.nn import init
@@ -43,16 +41,14 @@ if __name__ == "__main__":
 
     treenet_model = TreeNet(tree_builder, value_network)
 
-    train_plan = pd.read_csv(current_dir + '/information/query_plans.csv')
-    queries = train_plan['query'].tolist()
+    train = pd.read_csv('/home/ubuntu/project/mayang/Classification/process_data/tpch/tpch_train.csv')
+    queries = train['query'].tolist()
 
-    plans_json = train_plan["plan"].tolist()
+    plans_json = train["plan"].tolist()
 
 
-    workload_embedder_path = os.path.join("./information/", "embedder.pth")
+    workload_embedder_path = os.path.join("./information/tpch", "embedder.pth")
     workload_embedder = PredicateEmbedderDoc2Vec(queries[:], plans_json, 20, database_runner=pgrunner, file_name=workload_embedder_path)
-
-    train = pd.read_csv(current_dir + '/information/train.csv')
 
     train.head()
 
@@ -73,7 +69,7 @@ if __name__ == "__main__":
     list_batch_loss = []
     # 训练循环
     batch_num = 0
-    for epoch in range(1):  # 例如，训练多个 epochs
+    for epoch in range(10):  # 例如，训练多个 epochs
         loader = Data.DataLoader(dataset=torch_dataset,
                                  batch_size=Batch_Size,
                                  shuffle=True,
@@ -90,6 +86,8 @@ if __name__ == "__main__":
 
                 # 计算损失
                 loss, pred_val = treenet_model.train(plan_json, sql_vec, target_value, is_train=True)
+                if torch.isnan(loss):
+                    print("Loss is NaN")
                 batch_loss += loss
                 list_loss.append(loss)
                 print(
@@ -104,20 +102,20 @@ if __name__ == "__main__":
             list_batch_loss.append(batch_loss / actual_batch_size)
             print("optimize batch loss : {}".format(optimize_loss))
 
-    # 创建保存模型的文件夹
-    current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    save_dir = os.path.join(current_dir, "models", current_time)
-    os.makedirs(save_dir, exist_ok=True)
+        # 创建保存模型的文件夹
+        current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        save_dir = os.path.join(current_dir, "models", current_time)
+        os.makedirs(save_dir, exist_ok=True)
 
-    # 保存模型
-    model_path = os.path.join(save_dir, "model_value_network.pth")
-    torch.save(treenet_model.value_network.state_dict(), model_path)
+        # 保存模型
+        model_path = os.path.join(save_dir, "model_value_network.pth")
+        torch.save(treenet_model.value_network.state_dict(), model_path)
 
-    # 保存训练结果
-    res = pd.DataFrame()
-    res['loss'] = [float(x) for x in list_loss]
-    res.to_csv(os.path.join(save_dir, "training_result.csv"))
+        # 保存训练结果
+        res = pd.DataFrame()
+        res['loss'] = [float(x) for x in list_loss]
+        res.to_csv(os.path.join(save_dir, "training_result.csv"))
 
-    batch = pd.DataFrame()
-    batch['training batch loss'] = [float(x) for x in list_batch_loss]
-    batch.to_csv(os.path.join(save_dir, "batch_result.csv"))
+        batch = pd.DataFrame()
+        batch['training batch loss'] = [float(x) for x in list_batch_loss]
+        batch.to_csv(os.path.join(save_dir, "batch_result.csv"))

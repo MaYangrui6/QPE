@@ -15,8 +15,8 @@ logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=lo
 class WorkloadEmbedder(object):
     def __init__(self, query_texts, query_plans, representation_size):
         self.query_texts = query_texts
-        # self.plans = [ast.literal_eval(json)["Plan"] for json in query_plans]
-        self.plans = [json.loads(plan)[0]["Plan"] for plan in query_plans]
+        self.plans = [ast.literal_eval(plan)[0]["Plan"] for plan in query_plans]
+        # self.plans = [json.loads(plan)[0]["Plan"] for plan in query_plans]
         self.representation_size = representation_size
 
     def get_embedding(self, workload):

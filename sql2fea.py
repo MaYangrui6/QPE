@@ -131,7 +131,7 @@ def get_max_NullFraction_DistinctValues(cols_list):
         return [0, 1]
     else:
         NullFraction_value = [Column_to_NullFraction_dict[col] for col in cols_list]
-        DistinctValues_value = [Column_to_DistinctValues_dict[col] / col_row_counts[col] for col in cols_list]
+        DistinctValues_value = [Column_to_DistinctValues_dict[col] / (1+col_row_counts[col]) for col in cols_list]
         table
 
         return max(NullFraction_value), max(DistinctValues_value)
@@ -201,7 +201,20 @@ value_extractor = ValueExtractor()
 
 
 def get_plan_stats(data):
-    return [data["Total Cost"], data["Plan Rows"]]
+    total_cost = float(data["Total Cost"])  # 确保转换为浮点数
+    plan_rows = float(data["Plan Rows"])  # 确保转换为浮点数
+    return [np.log(1+total_cost), np.log(1+plan_rows)]
+# def get_plan_stats(data):
+#     total_cost = float(data["Total Cost"])  # 确保转换为浮点数
+#     plan_rows = float(data["Plan Rows"])  # 确保转换为浮点数
+#
+#     # 设置一个阈值，防止过大的输入
+#     max_value = 1e20  # 可根据需要调整
+#
+#     total_cost_log = np.log(1 + total_cost) if total_cost < max_value else np.log(max_value)
+#     plan_rows_log = np.log(1 + plan_rows) if plan_rows < max_value else np.log(max_value)
+#
+#     return [total_cost_log, plan_rows_log]
 
 
 class TreeBuilderError(Exception):
@@ -288,16 +301,17 @@ class TreeBuilder:
         cost_est_rows = self.__stats(node)
         # print('cost_est_rows',cost_est_rows)
         if node["Node Type"] != 'Sort':
-            cost_reduction = (1 -  cost_est_rows[1]/children_inputrows) * cost_est_rows[0]
+            cost_reduction = (1 -  cost_est_rows[1]/(children_inputrows+1)) * cost_est_rows[0]
         else:
             cost_reduction = cost_est_rows[0]
         # print('cost_reduction',cost_reduction)
         arr = np.zeros(len(ALL_TYPES))
         arr[ALL_TYPES.index(node["Node Type"])] = 1
         feature = np.concatenate((arr, encode_operator_heap_type(node['Node Type']), cost_est_rows,
-                                  [cost_est_rows[1]/children_inputrows, current_height, cost_reduction],
+                                  [np.log(1+cost_est_rows[1]/(children_inputrows+1)), current_height, np.log(1+cost_reduction)],
                                   NullFraction_DistinctValues))
         # print('promotion',feature)
+        # print('join feature',feature)
         feature = torch.tensor(feature, device=config.device, dtype=torch.float32).reshape(-1, config.input_size)
         return feature
 
@@ -311,8 +325,9 @@ class TreeBuilder:
         arr = np.zeros(len(ALL_TYPES))
         arr[ALL_TYPES.index(node["Node Type"])] = 1
         feature = np.concatenate((arr, encode_operator_heap_type(node['Node Type']), cost_est_rows,
-                                  [1, current_height, cost_reduction], NullFraction_DistinctValues))
+                                  [1, current_height, np.log(1+cost_reduction)], NullFraction_DistinctValues))
         feature = torch.tensor(feature, device=config.device, dtype=torch.float32).reshape(-1, config.input_size)
+        # print('scan feature', feature)
         return feature
 
     def plan_to_feature_tree(self, plan, current_height):
