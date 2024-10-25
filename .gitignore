@@ -1,5 +1,10 @@
-.idea
+.idea/
 .ipynb_checkpoints
 information
 *.txt
 __pycache__/
+sql/
+temps/
+venv/
+*.pkl
+models/
