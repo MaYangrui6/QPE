@@ -338,7 +338,7 @@ class TreeBuilder:
                 cond_list.append(table_Alias+'_47_'+plan[key_cond])#_*_连接table and key
                 
         #处理operator对应的configruations
-        #每个cond应该对应不同的values_to_add，可能index建立在filter而不再cond上
+        #每个cond应该对应不同的values_to_add，可能index建立在filter而不在cond上
         values_to_add_list=[]
         #configuration中涉及很多个索引index
         for cond in cond_list:
