@@ -6,7 +6,7 @@ class Config:
     def __init__(self, ):
         self.datafile = 'JOBqueries.workload'
         self.schemaFile = "schema.sql"
-        self.database = 'imdbload'
+        self.database = 'indexselection_tpcds___10'
         self.user = 'postgres'
         self.password = "password"
         self.userName = self.user
